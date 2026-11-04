@@ -29,8 +29,6 @@ namespace RagfairMultiCurrency
         internal static ConfigEntry<string> UsdColor;
         internal static ConfigEntry<string> EurColor;
         internal static ConfigEntry<bool> HideVanillaPrices;
-        internal static ConfigEntry<float> Gap;
-        internal static ConfigEntry<float> VerticalNudge;
         internal static ConfigEntry<float> FontSize;
         internal static ConfigEntry<float> LineSpacing;
         internal static ConfigEntry<bool> DumpLayout;
@@ -83,16 +81,6 @@ namespace RagfairMultiCurrency
 
             HideVanillaPrices = Config.Bind("Display", "HideVanillaPrices", true,
                 "Hide the vanilla rouble price rows in the item preview. Reference prices move into the requirement area instead.");
-
-            Gap = Config.Bind("Layout", "Gap", 4f,
-                new ConfigDescription(
-                    "Vertical gap in pixels between the vanilla price panel and the extra block.",
-                    new AcceptableValueRange<float>(0f, 200f)));
-
-            VerticalNudge = Config.Bind("Layout", "VerticalNudge", 0f,
-                new ConfigDescription(
-                    "Extra vertical offset in pixels. Positive moves the block down.",
-                    new AcceptableValueRange<float>(-300f, 300f)));
 
             FontSize = Config.Bind("Layout", "FontSize", 14f,
                 new ConfigDescription(

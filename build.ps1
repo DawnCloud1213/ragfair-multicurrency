@@ -1,9 +1,13 @@
 param(
-    [string]$GameDir = "D:\free games\EFT_0821",
+    [string]$GameDir = $env:SPT_GAME_DIR,
     [switch]$Deploy
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $GameDir) {
+    throw "Set SPT_GAME_DIR (or pass -GameDir) to point at your SPT client folder."
+}
 
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectDir = Join-Path $repoRoot "src\RagfairMultiCurrency"

@@ -1,9 +1,20 @@
 param(
-    [string]$AssemblyPath = 'D:\free games\EFT_0821\EscapeFromTarkov_Data\Managed\Assembly-CSharp.dll',
-    [string]$CecilPath = 'D:\free games\EFT_0821\BepInEx\core\Mono.Cecil.dll'
+    [string]$GameDir = $env:SPT_GAME_DIR,
+    [string]$AssemblyPath = '',
+    [string]$CecilPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $AssemblyPath) {
+    if (-not $GameDir) { throw 'Set SPT_GAME_DIR (or pass -GameDir) to your SPT client folder.' }
+    $AssemblyPath = Join-Path $GameDir 'EscapeFromTarkov_Data\Managed\Assembly-CSharp.dll'
+}
+
+if (-not $CecilPath) {
+    if (-not $GameDir) { throw 'Set SPT_GAME_DIR (or pass -GameDir) to your SPT client folder.' }
+    $CecilPath = Join-Path $GameDir 'BepInEx\core\Mono.Cecil.dll'
+}
 # Loading by path trips the "assembly from a network location" CAS check here, so read the
 # bytes and load from memory instead.
 $cecilBytes = [System.IO.File]::ReadAllBytes($CecilPath)
