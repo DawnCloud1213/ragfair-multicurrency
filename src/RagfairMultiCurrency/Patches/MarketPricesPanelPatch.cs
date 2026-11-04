@@ -76,6 +76,7 @@ namespace RagfairMultiCurrency.Patches
                 }
 
                 HideVanillaPriceRows(__instance);
+                HideRequirementTitle(__instance);
 
                 if (MultiCurrencyPlugin.DumpLayout.Value && !_layoutDumped)
                 {
@@ -156,6 +157,11 @@ namespace RagfairMultiCurrency.Patches
                 if (cells == null)
                 {
                     continue;
+                }
+
+                if (row == 0)
+                {
+                    EnsureHeader(view, panel);
                 }
 
                 float[] amounts;
@@ -318,6 +324,140 @@ namespace RagfairMultiCurrency.Patches
                 if (MultiCurrencyPlugin.Log != null)
                 {
                     MultiCurrencyPlugin.Log.LogError("[RMC] click failed: " + ex);
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------- header + vanilla title
+
+        private const string HeaderName = "RMC_Header";
+
+        private static void EnsureHeader(RequirementView rubView, ItemMarketPricesPanel panel)
+        {
+            if (rubView._inputField == null)
+            {
+                return;
+            }
+
+            Transform parent = rubView._inputField.transform.parent;
+            if (parent == null)
+            {
+                return;
+            }
+
+            Transform existing = parent.Find(HeaderName);
+            if (existing != null && existing.childCount == 4)
+            {
+                return;
+            }
+
+            if (existing != null)
+            {
+                UnityEngine.Object.Destroy(existing.gameObject);
+            }
+
+            if (panel._lowestLabel == null)
+            {
+                return;
+            }
+
+            GameObject header = new GameObject(HeaderName, typeof(RectTransform));
+            RectTransform headerRect = header.GetComponent<RectTransform>();
+            headerRect.SetParent(parent, false);
+            headerRect.anchorMin = new Vector2(0f, 1f);
+            headerRect.anchorMax = new Vector2(1f, 1f);
+            headerRect.pivot = new Vector2(0.5f, 0f);
+            headerRect.offsetMin = new Vector2(0f, 18f);
+            headerRect.offsetMax = new Vector2(0f, 38f);
+            headerRect.SetAsLastSibling();
+
+            string[] labels = new string[]
+            {
+                "\u6700\u4F4E",   // lowest
+                "\u5E73\u5747",   // average
+                "\u6700\u9AD8",   // maximum
+                "\u62A5\u4EF7"    // offer
+            };
+
+            float[] widths = new float[] { 0.2f, 0.2f, 0.2f, 0.4f };
+
+            float x = 0f;
+            for (int i = 0; i < labels.Length; i++)
+            {
+                GameObject cellObject = UnityEngine.Object.Instantiate<GameObject>(
+                    panel._lowestLabel.gameObject,
+                    headerRect,
+                    false);
+
+                cellObject.name = "RMC_Header_" + i;
+                cellObject.SetActive(true);
+
+                RectTransform cellRect = cellObject.GetComponent<RectTransform>();
+                if (cellRect != null)
+                {
+                    cellRect.anchorMin = new Vector2(x, 0f);
+                    cellRect.anchorMax = new Vector2(x + widths[i], 1f);
+                    cellRect.offsetMin = Vector2.zero;
+                    cellRect.offsetMax = Vector2.zero;
+                }
+
+                ClickableUIText cell = cellObject.GetComponent<ClickableUIText>();
+                if (cell == null || cell._textMessage == null)
+                {
+                    UnityEngine.Object.Destroy(cellObject);
+                    x += widths[i];
+                    continue;
+                }
+
+                cell._textMessage.fontSize = MultiCurrencyPlugin.FontSize.Value;
+                cell._textMessage.alignment = TextAlignmentOptions.Center;
+                cell._textMessage.enableWordWrapping = false;
+                cell.SetText(
+                    "<color=#9AA4B2>" + labels[i] + "</color>",
+                    new Action<PointerEventData>(delegate(PointerEventData data) { }),
+                    new Action<string>(delegate(string link) { }));
+
+                x += widths[i];
+            }
+        }
+
+        private static void HideRequirementTitle(ItemMarketPricesPanel panel)
+        {
+            if (!MultiCurrencyPlugin.HideVanillaPrices.Value)
+            {
+                return;
+            }
+
+            Transform labels = panel.transform.parent;
+            Transform preview = labels != null ? labels.parent : null;
+            Transform requirementPart = preview != null ? preview.parent : null;
+            if (requirementPart == null)
+            {
+                return;
+            }
+
+            TextMeshProUGUI[] texts = requirementPart.GetComponentsInChildren<TextMeshProUGUI>(true);
+            for (int i = 0; i < texts.Length; i++)
+            {
+                TextMeshProUGUI text = texts[i];
+                if (text == null || text.text == null)
+                {
+                    continue;
+                }
+
+                string value = text.text.Trim();
+                if (value.Length == 0)
+                {
+                    continue;
+                }
+
+                // Hide the vanilla "Requirement" section header on any language build.
+                if (value == "\u8981\u6C42" || value.StartsWith("\u8981\u6C42"))
+                {
+                    if (text.gameObject.activeSelf)
+                    {
+                        text.gameObject.SetActive(false);
+                    }
                 }
             }
         }
