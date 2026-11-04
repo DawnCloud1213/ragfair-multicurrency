@@ -13,7 +13,7 @@ namespace RagfairMultiCurrency
     {
         public const string PluginGuid = "com.dawncloud.ragfairmulticurrency";
         public const string PluginName = "Ragfair Multi Currency Prices";
-        public const string PluginVersion = "0.2.1";
+        public const string PluginVersion = "0.3.0";
 
         internal static MultiCurrencyPlugin Instance;
         internal static ManualLogSource Log;
@@ -90,9 +90,9 @@ namespace RagfairMultiCurrency
                     "Extra vertical offset in pixels. Positive moves the block down.",
                     new AcceptableValueRange<float>(-300f, 300f)));
 
-            FontSize = Config.Bind("Layout", "FontSize", 18f,
+            FontSize = Config.Bind("Layout", "FontSize", 14f,
                 new ConfigDescription(
-                    "Font size of the extra price block.",
+                    "Font size of the extra price block. 14 matches the vanilla price rows; raise it if too small for your screen.",
                     new AcceptableValueRange<float>(6f, 60f)));
 
             LineSpacing = Config.Bind("Layout", "LineSpacing", 1f,
