@@ -2,33 +2,38 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
-using System.Text;
 using EFT.InventoryLogic;
 using EFT.UI;
 using EFT.UI.Ragfair;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 namespace RagfairMultiCurrency.Patches
 {
     /// <summary>
-    /// Adds a clickable block of extra price rows (USD x3 + EUR x3) under the vanilla market
-    /// price panel. The vanilla three rouble rows are left untouched. Clicking one of our rows
-    /// fills the matching currency input field through the game's own RequirementView.SetValue.
+    /// Reference prices live in the requirement area, on the LEFT of every offer input field:
+    /// the vanilla input is shrunk to the right side and three price cells (lowest / average /
+    /// maximum) take the remaining space of the same row. Clicking a cell clears the other
+    /// currency fields and fills the matching one through RequirementView.SetValue.
     /// </summary>
     internal static class MarketPricesPanelPatch
     {
-        private const string BlockName = "RMC_MultiCurrencyBlock";
-        private const string RowNamePrefix = "RMC_Row_";
-        private const int RowCount = 6;
+        private const string CellPrefix = "RMC_Price_";
+        private const int ColCount = 3;
+        private const float CellAreaRatio = 0.6f;   // left 60% = prices, right 40% = input field
 
         private static bool _layoutDumped;
+        private static bool _titleTextsDumped;
         private static int _dumpedNodes;
 
-        private static readonly List<ClickableUIText> Rows = new List<ClickableUIText>();
-        private static readonly List<float> RowAmounts = new List<float>();
-        private static readonly List<ECurrencyType> RowCurrencies = new List<ECurrencyType>();
+        // index = currencyRow * 3 + metric(0=low,1=avg,2=max)
+        private static readonly float[] CellAmounts = new float[9];
+        private static readonly ECurrencyType[] CellCurrencies = new ECurrencyType[9];
+
+        private static readonly Dictionary<ECurrencyType, ClickableUIText[]> CellsByCurrency =
+            new Dictionary<ECurrencyType, ClickableUIText[]>();
 
         private static AddOfferWindow _boundWindow;
 
@@ -71,6 +76,9 @@ namespace RagfairMultiCurrency.Patches
                     return;
                 }
 
+                HideVanillaPriceRows(__instance);
+                HideRequirementTitle(__instance);
+
                 if (MultiCurrencyPlugin.DumpLayout.Value && !_layoutDumped)
                 {
                     _layoutDumped = true;
@@ -82,11 +90,10 @@ namespace RagfairMultiCurrency.Patches
                     return;
                 }
 
-                UpdateBlock(window, __instance, rubMin, rubAvg, rubMax);
+                UpdateRowPrices(window, __instance, rubMin, rubAvg, rubMax);
             }
             catch (Exception ex)
             {
-                // Never let a display bug bubble up into the game.
                 if (MultiCurrencyPlugin.Log != null)
                 {
                     MultiCurrencyPlugin.Log.LogError("[RMC] " + ex);
@@ -94,7 +101,22 @@ namespace RagfairMultiCurrency.Patches
             }
         }
 
-        private static void UpdateBlock(
+        private static void HideVanillaPriceRows(ItemMarketPricesPanel panel)
+        {
+            if (!MultiCurrencyPlugin.HideVanillaPrices.Value)
+            {
+                return;
+            }
+
+            if (panel._pricesPanel != null && panel._pricesPanel.activeSelf)
+            {
+                panel._pricesPanel.SetActive(false);
+            }
+        }
+
+        // ---------------------------------------------------------------- row prices
+
+        private static void UpdateRowPrices(
             AddOfferWindow window,
             ItemMarketPricesPanel panel,
             float rubMin,
@@ -106,8 +128,10 @@ namespace RagfairMultiCurrency.Patches
                 return;
             }
 
-            EnsureRows(window, panel);
-            if (Rows.Count < RowCount)
+            _boundWindow = window;
+
+            List<RequirementView> views = GetAllRequirementViews(window);
+            if (views.Count == 0)
             {
                 return;
             }
@@ -115,113 +139,170 @@ namespace RagfairMultiCurrency.Patches
             float usdRate = MultiCurrencyPlugin.UsdRate.Value;
             float eurRate = MultiCurrencyPlugin.EurRate.Value;
 
-            RowAmounts.Clear();
-            RowCurrencies.Clear();
-
-            RowAmounts.Add(usdRate > 0f ? rubMin / usdRate : 0f);
-            RowAmounts.Add(usdRate > 0f ? rubAvg / usdRate : 0f);
-            RowAmounts.Add(usdRate > 0f ? rubMax / usdRate : 0f);
-            RowAmounts.Add(eurRate > 0f ? rubMin / eurRate : 0f);
-            RowAmounts.Add(eurRate > 0f ? rubAvg / eurRate : 0f);
-            RowAmounts.Add(eurRate > 0f ? rubMax / eurRate : 0f);
-
-            RowCurrencies.Add(ECurrencyType.USD);
-            RowCurrencies.Add(ECurrencyType.USD);
-            RowCurrencies.Add(ECurrencyType.USD);
-            RowCurrencies.Add(ECurrencyType.EUR);
-            RowCurrencies.Add(ECurrencyType.EUR);
-            RowCurrencies.Add(ECurrencyType.EUR);
-
-            bool showUsd = MultiCurrencyPlugin.ShowUsd.Value && usdRate > 0f;
-            bool showEur = MultiCurrencyPlugin.ShowEur.Value && eurRate > 0f;
-
-            for (int i = 0; i < RowCount; i++)
+            ECurrencyType[] order = new ECurrencyType[]
             {
-                ClickableUIText row = Rows[i];
-                if (row == null)
+                ECurrencyType.RUB,
+                ECurrencyType.USD,
+                ECurrencyType.EUR
+            };
+
+            for (int row = 0; row < order.Length; row++)
+            {
+                RequirementView view = FindInList(views, order[row]);
+                if (view == null)
                 {
                     continue;
                 }
 
-                bool visible = i < 3 ? showUsd : showEur;
-                row.gameObject.SetActive(visible);
-                if (!visible)
+                ClickableUIText[] cells = EnsureRowCells(view, order[row]);
+                if (cells == null)
                 {
                     continue;
                 }
 
-                string text = BuildRowText(i, RowAmounts[i]);
-                int captured = i;
+                if (row == 0)
+                {
+                    EnsureHeader(view, panel);
+                }
 
-                row.SetText(
-                    text,
-                    new Action<PointerEventData>(delegate(PointerEventData data) { OnRowClicked(captured); }),
-                    new Action<string>(delegate(string link) { }));
+                float[] amounts;
+                if (row == 0)
+                {
+                    amounts = new float[] { rubMin, rubAvg, rubMax };
+                }
+                else if (row == 1)
+                {
+                    amounts = new float[]
+                    {
+                        usdRate > 0f ? rubMin / usdRate : 0f,
+                        usdRate > 0f ? rubAvg / usdRate : 0f,
+                        usdRate > 0f ? rubMax / usdRate : 0f
+                    };
+                }
+                else
+                {
+                    amounts = new float[]
+                    {
+                        eurRate > 0f ? rubMin / eurRate : 0f,
+                        eurRate > 0f ? rubAvg / eurRate : 0f,
+                        eurRate > 0f ? rubMax / eurRate : 0f
+                    };
+                }
+
+                string color = row == 0
+                    ? "#E6E6E6"
+                    : (row == 1 ? MultiCurrencyPlugin.UsdColor.Value : MultiCurrencyPlugin.EurColor.Value);
+
+                for (int metric = 0; metric < ColCount; metric++)
+                {
+                    int dataIndex = row * ColCount + metric;
+                    CellAmounts[dataIndex] = amounts[metric];
+                    CellCurrencies[dataIndex] = order[row];
+
+                    string text;
+                    if (row == 0)
+                    {
+                        text = FormatMoney(amounts[metric], 0) + " \u20BD";
+                    }
+                    else if (row == 1)
+                    {
+                        text = "$" + FormatMoney(amounts[metric], MultiCurrencyPlugin.Decimals.Value);
+                    }
+                    else
+                    {
+                        text = "\u20AC" + FormatMoney(amounts[metric], MultiCurrencyPlugin.Decimals.Value);
+                    }
+
+                    ApplyCell(cells[metric], text, color, dataIndex);
+                }
             }
         }
 
-        private static string BuildRowText(int index, float amount)
+        private static void ApplyCell(ClickableUIText cell, string rawText, string color, int dataIndex)
         {
-            string currency;
-            string metric;
-            string symbol;
-            string color;
-
-            if (index < 3)
+            if (cell == null)
             {
-                currency = "USD";
-                symbol = "$";
-                color = MultiCurrencyPlugin.UsdColor.Value;
-            }
-            else
-            {
-                currency = "EUR";
-                symbol = "\u20AC";
-                color = MultiCurrencyPlugin.EurColor.Value;
+                return;
             }
 
-            int slot = index % 3;
-            if (slot == 0)
-            {
-                metric = "\u6700\u4F4E";
-            }
-            else if (slot == 1)
-            {
-                metric = "\u5E73\u5747";
-            }
-            else
-            {
-                metric = "\u6700\u9AD8";
-            }
+            string text = MultiCurrencyPlugin.Colorize.Value && !string.IsNullOrEmpty(color)
+                ? "<color=" + color + ">" + rawText + "</color>"
+                : rawText;
 
-            string number = symbol + FormatMoney(amount, MultiCurrencyPlugin.Decimals.Value);
-            return currency + "  " + metric + "  " + Wrap(number, color, MultiCurrencyPlugin.Colorize.Value);
+            int captured = dataIndex;
+            cell.SetText(
+                text,
+                new Action<PointerEventData>(delegate(PointerEventData data) { OnCellClicked(captured); }),
+                new Action<string>(delegate(string link) { }));
         }
 
-        private static void OnRowClicked(int index)
+        private static Color32 ParseColor(string hex, Color32 fallback)
+        {
+            if (string.IsNullOrEmpty(hex))
+            {
+                return fallback;
+            }
+
+            string value = hex.Trim();
+            if (value.StartsWith("#", StringComparison.Ordinal))
+            {
+                value = value.Substring(1);
+            }
+
+            if (value.Length != 6)
+            {
+                return fallback;
+            }
+
+            try
+            {
+                byte r = byte.Parse(value.Substring(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                byte g = byte.Parse(value.Substring(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                byte b = byte.Parse(value.Substring(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                return new Color32(r, g, b, 255);
+            }
+            catch
+            {
+                return fallback;
+            }
+        }
+
+        private static void OnCellClicked(int dataIndex)
         {
             try
             {
-                if (index < 0 || index >= RowAmounts.Count || index >= RowCurrencies.Count)
-                {
-                    return;
-                }
-
                 if (_boundWindow == null)
                 {
                     return;
                 }
 
-                float amount = RowAmounts[index];
-                ECurrencyType currency = RowCurrencies[index];
+                if (dataIndex < 0 || dataIndex >= CellAmounts.Length)
+                {
+                    return;
+                }
+
+                float amount = CellAmounts[dataIndex];
+                ECurrencyType currency = CellCurrencies[dataIndex];
 
                 if (amount <= 0f)
                 {
                     return;
                 }
 
-                RequirementView view = FindRequirementView(_boundWindow, currency);
-                if (view == null)
+                string input = Math.Round((double)amount, 0, MidpointRounding.AwayFromZero)
+                    .ToString("F0", CultureInfo.InvariantCulture);
+
+                List<RequirementView> views = GetAllRequirementViews(_boundWindow);
+                for (int i = 0; i < views.Count; i++)
+                {
+                    if (views[i] != null && views[i]._currency != currency)
+                    {
+                        views[i].SetValue(string.Empty);
+                    }
+                }
+
+                RequirementView target = FindInList(views, currency);
+                if (target == null)
                 {
                     if (MultiCurrencyPlugin.LogPrices.Value)
                     {
@@ -231,14 +312,12 @@ namespace RagfairMultiCurrency.Patches
                     return;
                 }
 
-                string input = Math.Round((double)amount, 0, MidpointRounding.AwayFromZero)
-                    .ToString("F0", CultureInfo.InvariantCulture);
-
-                view.SetValue(input);
+                target.SetValue(input);
 
                 if (MultiCurrencyPlugin.LogPrices.Value)
                 {
-                    MultiCurrencyPlugin.Log.LogInfo("[RMC] filled " + currency + " field with " + input);
+                    MultiCurrencyPlugin.Log.LogInfo(
+                        "[RMC] cleared other currencies, filled " + currency + " with " + input);
                 }
             }
             catch (Exception ex)
@@ -250,13 +329,319 @@ namespace RagfairMultiCurrency.Patches
             }
         }
 
-        private static RequirementView FindRequirementView(AddOfferWindow window, ECurrencyType currency)
+        // ---------------------------------------------------------------- header + vanilla title
+
+        private const string HeaderName = "RMC_Header";
+
+        private static void EnsureHeader(RequirementView rubView, ItemMarketPricesPanel panel)
         {
-            // _rubRequirementView is private on AddOfferWindow, so it has to go through reflection.
-            RequirementView rub = GetFieldValue<RequirementView>(window, "_rubRequirementView");
-            if (rub != null && rub._currency == currency)
+            if (rubView._inputField == null)
             {
-                return rub;
+                return;
+            }
+
+            Transform parent = rubView._inputField.transform.parent;
+            if (parent == null)
+            {
+                return;
+            }
+
+            Transform existing = parent.Find(HeaderName);
+            if (existing != null && existing.childCount == 4)
+            {
+                return;
+            }
+
+            if (existing != null)
+            {
+                UnityEngine.Object.Destroy(existing.gameObject);
+            }
+
+            if (panel._lowestLabel == null)
+            {
+                return;
+            }
+
+            GameObject header = new GameObject(HeaderName, typeof(RectTransform));
+            RectTransform headerRect = header.GetComponent<RectTransform>();
+            headerRect.SetParent(parent, false);
+            headerRect.anchorMin = new Vector2(0f, 1f);
+            headerRect.anchorMax = new Vector2(1f, 1f);
+            headerRect.pivot = new Vector2(0.5f, 0f);
+            headerRect.offsetMin = new Vector2(0f, 18f);
+            headerRect.offsetMax = new Vector2(0f, 38f);
+            headerRect.SetAsLastSibling();
+
+            string[] labels = new string[]
+            {
+                "\u6700\u4F4E",   // lowest
+                "\u5E73\u5747",   // average
+                "\u6700\u9AD8",   // maximum
+                "\u62A5\u4EF7"    // offer
+            };
+
+            float[] widths = new float[] { 0.2f, 0.2f, 0.2f, 0.4f };
+
+            float x = 0f;
+            for (int i = 0; i < labels.Length; i++)
+            {
+                GameObject cellObject = UnityEngine.Object.Instantiate<GameObject>(
+                    panel._lowestLabel.gameObject,
+                    headerRect,
+                    false);
+
+                cellObject.name = "RMC_Header_" + i;
+                cellObject.SetActive(true);
+
+                RectTransform cellRect = cellObject.GetComponent<RectTransform>();
+                if (cellRect != null)
+                {
+                    cellRect.anchorMin = new Vector2(x, 0f);
+                    cellRect.anchorMax = new Vector2(x + widths[i], 1f);
+                    cellRect.offsetMin = Vector2.zero;
+                    cellRect.offsetMax = Vector2.zero;
+                }
+
+                ClickableUIText cell = cellObject.GetComponent<ClickableUIText>();
+                if (cell == null || cell._textMessage == null)
+                {
+                    UnityEngine.Object.Destroy(cellObject);
+                    x += widths[i];
+                    continue;
+                }
+
+                cell._textMessage.fontSize = MultiCurrencyPlugin.FontSize.Value;
+                cell._textMessage.alignment = TextAlignmentOptions.Center;
+                cell._textMessage.enableWordWrapping = false;
+                cell.SetText(
+                    "<color=#9AA4B2>" + labels[i] + "</color>",
+                    new Action<PointerEventData>(delegate(PointerEventData data) { }),
+                    new Action<string>(delegate(string link) { }));
+
+                x += widths[i];
+            }
+        }
+
+        // Localization keys of the vanilla labels we replace. Taken from SPT_Data locales:
+        //   ragfair/REQUIREMENTS     -> 要求
+        //   ragfair/(per one item)   -> (每一件物品)
+        //   ragfair/(per all items)  -> (全部物品)
+        private static readonly string[] HiddenLocalizationKeys = new string[]
+        {
+            "ragfair/REQUIREMENTS",
+            "ragfair/(per one item)",
+            "ragfair/(per all items)",
+            "ragfair/per item"
+        };
+
+        private static void HideRequirementTitle(ItemMarketPricesPanel panel)
+        {
+            if (!MultiCurrencyPlugin.HideVanillaPrices.Value)
+            {
+                return;
+            }
+
+            Transform labels = panel.transform.parent;
+            Transform preview = labels != null ? labels.parent : null;
+            Transform requirementPart = preview != null ? preview.parent : null;
+            if (requirementPart == null)
+            {
+                return;
+            }
+
+            TextMeshProUGUI[] texts = requirementPart.GetComponentsInChildren<TextMeshProUGUI>(true);
+            for (int i = 0; i < texts.Length; i++)
+            {
+                TextMeshProUGUI text = texts[i];
+                if (text == null)
+                {
+                    continue;
+                }
+
+                string value = text.text == null ? string.Empty : text.text.Trim();
+
+                // Primary match: the localization key. Exact, language independent, and it cannot
+                // hit unrelated labels the way a substring search could.
+                string localizationKey = string.Empty;
+                LocalizedText localized = text.GetComponent<LocalizedText>();
+                if (localized != null && !string.IsNullOrEmpty(localized.localizationKey))
+                {
+                    localizationKey = localized.localizationKey;
+                }
+
+                bool shouldHide = false;
+                for (int k = 0; k < HiddenLocalizationKeys.Length; k++)
+                {
+                    if (localizationKey == HiddenLocalizationKeys[k])
+                    {
+                        shouldHide = true;
+                        break;
+                    }
+                }
+
+                // Fallback only when the object carries no localization key at all.
+                if (!shouldHide && localizationKey.Length == 0 && value.Length > 0)
+                {
+                    if (value == "\u8981\u6C42" || value.StartsWith("\u8981\u6C42"))
+                    {
+                        shouldHide = true;
+                    }
+                }
+
+                if (MultiCurrencyPlugin.LogPrices.Value && !_titleTextsDumped)
+                {
+                    MultiCurrencyPlugin.Log.LogInfo(
+                        "[RMC] requirement text: \"" + value + "\"  key=\"" + localizationKey + "\"  hide=" + shouldHide);
+                }
+
+                if (shouldHide && text.gameObject.activeSelf)
+                {
+                    text.gameObject.SetActive(false);
+                }
+            }
+
+            _titleTextsDumped = true;
+        }
+
+        // ---------------------------------------------------------------- cell creation
+
+        private static ClickableUIText[] EnsureRowCells(RequirementView view, ECurrencyType currency)
+        {
+            ClickableUIText[] cached;
+            if (CellsByCurrency.TryGetValue(currency, out cached) && cached != null)
+            {
+                bool alive = true;
+                for (int i = 0; i < cached.Length; i++)
+                {
+                    if (cached[i] == null)
+                    {
+                        alive = false;
+                        break;
+                    }
+                }
+
+                if (alive)
+                {
+                    return cached;
+                }
+
+                CellsByCurrency.Remove(currency);
+            }
+
+            if (view._inputField == null)
+            {
+                return null;
+            }
+
+            Transform inputTransform = view._inputField.transform;
+            Transform parent = inputTransform.parent;
+            if (parent == null)
+            {
+                return null;
+            }
+
+            // Shrink the vanilla input to the right side of the row.
+            RectTransform inputRect = inputTransform as RectTransform;
+            if (inputRect != null)
+            {
+                Vector2 min = inputRect.anchorMin;
+                Vector2 max = inputRect.anchorMax;
+                float span = max.x - min.x;
+
+                if (span > 0.9f)
+                {
+                    // Stretched across the row: keep the right share only.
+                    inputRect.anchorMin = new Vector2(CellAreaRatio, min.y);
+                }
+                else if (inputRect.sizeDelta.x > 1f)
+                {
+                    inputRect.sizeDelta = new Vector2(
+                        inputRect.sizeDelta.x * (1f - CellAreaRatio),
+                        inputRect.sizeDelta.y);
+                }
+            }
+
+            RectTransform labelTemplate = null;
+            ItemMarketPricesPanel templatePanel = _boundWindow != null
+                ? _boundWindow.GetComponentInChildren<ItemMarketPricesPanel>()
+                : null;
+            if (templatePanel != null && templatePanel._lowestLabel != null)
+            {
+                labelTemplate = templatePanel._lowestLabel.transform as RectTransform;
+            }
+
+            if (labelTemplate == null)
+            {
+                return null;
+            }
+
+            ClickableUIText[] cells = new ClickableUIText[ColCount];
+            float cellWidth = CellAreaRatio / ColCount;
+
+            for (int metric = 0; metric < ColCount; metric++)
+            {
+                GameObject cellObject = UnityEngine.Object.Instantiate<GameObject>(
+                    templatePanel._lowestLabel.gameObject,
+                    parent,
+                    false);
+
+                cellObject.name = CellPrefix + currency + "_" + metric;
+                cellObject.SetActive(true);
+
+                RectTransform cellRect = cellObject.GetComponent<RectTransform>();
+                if (cellRect != null)
+                {
+                    cellRect.anchorMin = new Vector2(metric * cellWidth, 0f);
+                    cellRect.anchorMax = new Vector2((metric + 1) * cellWidth, 1f);
+                    cellRect.offsetMin = Vector2.zero;
+                    cellRect.offsetMax = Vector2.zero;
+                    cellRect.SetAsLastSibling();
+
+                    // Keep the cell below the input in z-order so the input stays clickable
+                    // where they overlap (they should not overlap, but be safe).
+                    cellRect.SetSiblingIndex(Math.Max(0, cellRect.GetSiblingIndex()));
+                }
+
+                ClickableUIText cell = cellObject.GetComponent<ClickableUIText>();
+                if (cell == null)
+                {
+                    UnityEngine.Object.Destroy(cellObject);
+                    cells[metric] = null;
+                    continue;
+                }
+
+                if (cell._textMessage != null)
+                {
+                    cell._textMessage.fontSize = MultiCurrencyPlugin.FontSize.Value;
+                    cell._textMessage.alignment = TextAlignmentOptions.Center;
+                    cell._textMessage.enableWordWrapping = false;
+                }
+
+                cells[metric] = cell;
+            }
+
+            CellsByCurrency[currency] = cells;
+
+            if (MultiCurrencyPlugin.LogPrices.Value)
+            {
+                MultiCurrencyPlugin.Log.LogInfo(
+                    "[RMC] row cells created for " + currency +
+                    " under \"" + parent.name + "\"");
+            }
+
+            return cells;
+        }
+
+        // ---------------------------------------------------------------- requirement views
+
+        private static List<RequirementView> GetAllRequirementViews(AddOfferWindow window)
+        {
+            List<RequirementView> views = new List<RequirementView>();
+
+            RequirementView rub = GetFieldValue<RequirementView>(window, "_rubRequirementView");
+            if (rub != null)
+            {
+                views.Add(rub);
             }
 
             RequirementView[] all = GetFieldValue<RequirementView[]>(window, "_requirementViews");
@@ -264,9 +649,9 @@ namespace RagfairMultiCurrency.Patches
             {
                 for (int i = 0; i < all.Length; i++)
                 {
-                    if (all[i] != null && all[i]._currency == currency)
+                    if (all[i] != null && !views.Contains(all[i]))
                     {
-                        return all[i];
+                        views.Add(all[i]);
                     }
                 }
             }
@@ -276,10 +661,23 @@ namespace RagfairMultiCurrency.Patches
             {
                 for (int i = 0; i < dynamicViews.Count; i++)
                 {
-                    if (dynamicViews[i] != null && dynamicViews[i]._currency == currency)
+                    if (dynamicViews[i] != null && !views.Contains(dynamicViews[i]))
                     {
-                        return dynamicViews[i];
+                        views.Add(dynamicViews[i]);
                     }
+                }
+            }
+
+            return views;
+        }
+
+        private static RequirementView FindInList(List<RequirementView> views, ECurrencyType currency)
+        {
+            for (int i = 0; i < views.Count; i++)
+            {
+                if (views[i] != null && views[i]._currency == currency)
+                {
+                    return views[i];
                 }
             }
 
@@ -300,123 +698,7 @@ namespace RagfairMultiCurrency.Patches
             return field.GetValue(instance) as T;
         }
 
-        // ---------------------------------------------------------------- row creation
-
-        private static void EnsureRows(AddOfferWindow window, ItemMarketPricesPanel panel)
-        {
-            Transform parent = panel.transform.parent;
-            if (parent == null)
-            {
-                parent = window.transform;
-            }
-
-            Transform existing = parent.Find(BlockName);
-            if (existing != null && existing.childCount == RowCount)
-            {
-                Rows.Clear();
-                for (int i = 0; i < RowCount; i++)
-                {
-                    Rows.Add(existing.GetChild(i).GetComponent<ClickableUIText>());
-                }
-
-                _boundWindow = window;
-                return;
-            }
-
-            if (existing != null)
-            {
-                UnityEngine.Object.Destroy(existing.gameObject);
-            }
-
-            Rows.Clear();
-            _boundWindow = window;
-
-            if (panel._lowestLabel == null)
-            {
-                return;
-            }
-
-            RectTransform panelRect = panel.transform as RectTransform;
-            float panelWidth = panelRect != null ? panelRect.rect.width : 160f;
-            float panelHeight = panelRect != null ? panelRect.rect.height : 57f;
-
-            RectTransform labelRect = panel._lowestLabel.transform as RectTransform;
-            float rowHeight = labelRect != null && labelRect.rect.height > 1f
-                ? labelRect.rect.height
-                : MultiCurrencyPlugin.FontSize.Value * 1.35f;
-
-            float gap = MultiCurrencyPlugin.Gap.Value;
-            float nudge = MultiCurrencyPlugin.VerticalNudge.Value;
-
-            GameObject container = new GameObject(BlockName, typeof(RectTransform));
-            RectTransform containerRect = container.GetComponent<RectTransform>();
-            containerRect.SetParent(parent, false);
-            containerRect.anchorMin = new Vector2(1f, 1f);
-            containerRect.anchorMax = new Vector2(1f, 1f);
-            containerRect.pivot = new Vector2(1f, 1f);
-            containerRect.anchoredPosition = new Vector2(0f, -(panelHeight + gap + nudge));
-            containerRect.sizeDelta = new Vector2(panelWidth + 80f, rowHeight * RowCount);
-            container.transform.SetAsLastSibling();
-
-            for (int i = 0; i < RowCount; i++)
-            {
-                GameObject rowObject = UnityEngine.Object.Instantiate<GameObject>(
-                    panel._lowestLabel.gameObject,
-                    containerRect,
-                    false);
-
-                rowObject.name = RowNamePrefix + i;
-                rowObject.SetActive(true);
-
-                RectTransform rowRect = rowObject.GetComponent<RectTransform>();
-                if (rowRect != null)
-                {
-                    rowRect.anchorMin = new Vector2(1f, 1f);
-                    rowRect.anchorMax = new Vector2(1f, 1f);
-                    rowRect.pivot = new Vector2(1f, 1f);
-                    rowRect.anchoredPosition = new Vector2(0f, -(i * rowHeight));
-                    rowRect.sizeDelta = new Vector2(panelWidth + 80f, rowHeight);
-                }
-
-                ClickableUIText row = rowObject.GetComponent<ClickableUIText>();
-                if (row == null)
-                {
-                    UnityEngine.Object.Destroy(rowObject);
-                    Rows.Add(null);
-                    continue;
-                }
-
-                if (row._textMessage != null)
-                {
-                    row._textMessage.fontSize = MultiCurrencyPlugin.FontSize.Value;
-                    row._textMessage.alignment = TextAlignmentOptions.TopRight;
-                    row._textMessage.enableWordWrapping = false;
-                }
-
-                Rows.Add(row);
-            }
-
-            if (MultiCurrencyPlugin.LogPrices.Value)
-            {
-                MultiCurrencyPlugin.Log.LogInfo(
-                    "[RMC] clickable price block created under \"" + parent.name +
-                    "\" rows=" + RowCount +
-                    " rowHeight=" + rowHeight.ToString("0.##", CultureInfo.InvariantCulture) +
-                    " at y=" + (-(panelHeight + gap + nudge)).ToString("0.##", CultureInfo.InvariantCulture));
-            }
-        }
-
         // ---------------------------------------------------------------- helpers
-
-        private static string Wrap(string value, string color, bool colorize)
-        {
-            if (!colorize || string.IsNullOrEmpty(color))
-            {
-                return value;
-            }
-
-            return "<color=" + color + ">" + value + "</color>";
-        }
 
         private static string FormatMoney(float value, int decimals)
         {
@@ -432,7 +714,6 @@ namespace RagfairMultiCurrency.Patches
             try
             {
                 MultiCurrencyPlugin.Log.LogInfo("[RMC] ===== market price panel layout dump =====");
-                MultiCurrencyPlugin.Log.LogInfo("[RMC] panel class: " + panel.GetType().FullName);
 
                 Transform cursor = panel.transform;
                 for (int i = 0; i < 6 && cursor != null; i++)
@@ -441,19 +722,13 @@ namespace RagfairMultiCurrency.Patches
                     cursor = cursor.parent;
                 }
 
-                MultiCurrencyPlugin.Log.LogInfo("[RMC] inAddOfferWindow=" + (window != null));
-
-                _dumpedNodes = 0;
+                DumpRequirementArea(panel);
 
                 if (window != null)
                 {
+                    _dumpedNodes = 0;
                     MultiCurrencyPlugin.Log.LogInfo("[RMC] --- AddOfferWindow subtree ---");
                     DumpTransform(window.transform, 0);
-                }
-                else if (panel._pricesPanel != null)
-                {
-                    MultiCurrencyPlugin.Log.LogInfo("[RMC] --- pricesPanel subtree ---");
-                    DumpTransform(panel._pricesPanel.transform, 0);
                 }
 
                 MultiCurrencyPlugin.Log.LogInfo("[RMC] ===== end layout dump =====");
@@ -463,6 +738,61 @@ namespace RagfairMultiCurrency.Patches
                 if (MultiCurrencyPlugin.Log != null)
                 {
                     MultiCurrencyPlugin.Log.LogError("[RMC] dump failed: " + ex);
+                }
+            }
+        }
+
+        private static void DumpRequirementArea(ItemMarketPricesPanel panel)
+        {
+            AddOfferWindow window = panel.GetComponentInParent<AddOfferWindow>();
+            if (window == null)
+            {
+                MultiCurrencyPlugin.Log.LogInfo("[RMC] requirement area: no AddOfferWindow");
+                return;
+            }
+
+            List<RequirementView> views = GetAllRequirementViews(window);
+            MultiCurrencyPlugin.Log.LogInfo("[RMC] --- requirement views: " + views.Count + " ---");
+
+            for (int i = 0; i < views.Count; i++)
+            {
+                RequirementView view = views[i];
+                if (view == null)
+                {
+                    continue;
+                }
+
+                MultiCurrencyPlugin.Log.LogInfo(
+                    "[RMC]   view[" + i + "] currency=" + view._currency +
+                    " name=" + view.name +
+                    DescribeRect(view.transform) +
+                    DescribeComponents(view.transform));
+
+                if (view._inputField != null)
+                {
+                    MultiCurrencyPlugin.Log.LogInfo(
+                        "[RMC]     inputField " + view._inputField.name +
+                        DescribeRect(view._inputField.transform) +
+                        DescribeComponents(view._inputField.transform));
+
+                    Transform parent = view._inputField.transform.parent;
+                    if (parent != null)
+                    {
+                        MultiCurrencyPlugin.Log.LogInfo(
+                            "[RMC]     inputParent " + parent.name +
+                            DescribeRect(parent) +
+                            DescribeComponents(parent) +
+                            " kids=" + parent.childCount);
+
+                        for (int k = 0; k < parent.childCount && k < 12; k++)
+                        {
+                            Transform kid = parent.GetChild(k);
+                            MultiCurrencyPlugin.Log.LogInfo(
+                                "[RMC]       kid[" + k + "] " + kid.name +
+                                DescribeRect(kid) +
+                                DescribeComponents(kid));
+                        }
+                    }
                 }
             }
         }
@@ -525,19 +855,19 @@ namespace RagfairMultiCurrency.Patches
 
         private static void DumpTransform(Transform transform, int depth)
         {
-            if (transform == null || depth > 8)
+            if (transform == null || depth > 6)
             {
                 return;
             }
 
             _dumpedNodes++;
-            if (_dumpedNodes > 500)
+            if (_dumpedNodes > 200)
             {
-                if (_dumpedNodes == 501)
-                {
-                    MultiCurrencyPlugin.Log.LogInfo("[RMC] ... dump truncated at 500 nodes ...");
-                }
+                return;
+            }
 
+            if (transform.name.IndexOf("ragfair_layout", StringComparison.Ordinal) >= 0)
+            {
                 return;
             }
 

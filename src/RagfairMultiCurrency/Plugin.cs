@@ -13,7 +13,7 @@ namespace RagfairMultiCurrency
     {
         public const string PluginGuid = "com.dawncloud.ragfairmulticurrency";
         public const string PluginName = "Ragfair Multi Currency Prices";
-        public const string PluginVersion = "0.3.0";
+        public const string PluginVersion = "0.4.5";
 
         internal static MultiCurrencyPlugin Instance;
         internal static ManualLogSource Log;
@@ -28,8 +28,7 @@ namespace RagfairMultiCurrency
         internal static ConfigEntry<bool> Colorize;
         internal static ConfigEntry<string> UsdColor;
         internal static ConfigEntry<string> EurColor;
-        internal static ConfigEntry<float> Gap;
-        internal static ConfigEntry<float> VerticalNudge;
+        internal static ConfigEntry<bool> HideVanillaPrices;
         internal static ConfigEntry<float> FontSize;
         internal static ConfigEntry<float> LineSpacing;
         internal static ConfigEntry<bool> DumpLayout;
@@ -80,15 +79,8 @@ namespace RagfairMultiCurrency
             EurColor = Config.Bind("Display", "EurColor", "#5B8DEF",
                 "TMP color of the euro value, used when Colorize is on.");
 
-            Gap = Config.Bind("Layout", "Gap", 4f,
-                new ConfigDescription(
-                    "Vertical gap in pixels between the vanilla price panel and the extra block.",
-                    new AcceptableValueRange<float>(0f, 200f)));
-
-            VerticalNudge = Config.Bind("Layout", "VerticalNudge", 0f,
-                new ConfigDescription(
-                    "Extra vertical offset in pixels. Positive moves the block down.",
-                    new AcceptableValueRange<float>(-300f, 300f)));
+            HideVanillaPrices = Config.Bind("Display", "HideVanillaPrices", true,
+                "Hide the vanilla rouble price rows in the item preview. Reference prices move into the requirement area instead.");
 
             FontSize = Config.Bind("Layout", "FontSize", 14f,
                 new ConfigDescription(
