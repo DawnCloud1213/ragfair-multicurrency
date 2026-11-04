@@ -25,6 +25,7 @@ namespace RagfairMultiCurrency.Patches
         private const float CellAreaRatio = 0.6f;   // left 60% = prices, right 40% = input field
 
         private static bool _layoutDumped;
+        private static bool _titleTextsDumped;
         private static int _dumpedNodes;
 
         // index = currencyRow * 3 + metric(0=low,1=avg,2=max)
@@ -451,10 +452,19 @@ namespace RagfairMultiCurrency.Patches
                     continue;
                 }
 
-                // Hide the vanilla "Requirement" header and its "(per item)" sub-label
-                // on any language build.
+                // Hide the vanilla "Requirement" header and its per-item sub-label on any
+                // language build. The sub-label is matched loosely because its wording differs
+                // between locale files ("每件物品" / "每一物品" / "за предмет" ...).
                 bool isRequirementHeader = value == "\u8981\u6C42" || value.StartsWith("\u8981\u6C42");
-                bool isPerItemLabel = value.IndexOf("\u6BCF\u4EF6", StringComparison.Ordinal) >= 0;
+                bool isPerItemLabel =
+                    value.IndexOf("\u7269\u54C1", StringComparison.Ordinal) >= 0 ||
+                    value.IndexOf("\u6BCF", StringComparison.Ordinal) >= 0;
+
+                if (MultiCurrencyPlugin.LogPrices.Value && !_titleTextsDumped)
+                {
+                    MultiCurrencyPlugin.Log.LogInfo(
+                        "[RMC] requirement text: \"" + value + "\"  hide=" + (isRequirementHeader || isPerItemLabel));
+                }
 
                 if (isRequirementHeader || isPerItemLabel)
                 {
@@ -464,6 +474,8 @@ namespace RagfairMultiCurrency.Patches
                     }
                 }
             }
+
+            _titleTextsDumped = true;
         }
 
         // ---------------------------------------------------------------- cell creation
