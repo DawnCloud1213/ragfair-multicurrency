@@ -13,7 +13,7 @@ namespace RagfairMultiCurrency
     {
         public const string PluginGuid = "com.dawncloud.ragfairmulticurrency";
         public const string PluginName = "Ragfair Multi Currency Prices";
-        public const string PluginVersion = "0.3.0";
+        public const string PluginVersion = "0.4.0";
 
         internal static MultiCurrencyPlugin Instance;
         internal static ManualLogSource Log;
