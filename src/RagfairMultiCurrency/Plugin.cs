@@ -13,7 +13,7 @@ namespace RagfairMultiCurrency
     {
         public const string PluginGuid = "com.dawncloud.ragfairmulticurrency";
         public const string PluginName = "Ragfair Multi Currency Prices";
-        public const string PluginVersion = "0.4.0";
+        public const string PluginVersion = "0.4.1";
 
         internal static MultiCurrencyPlugin Instance;
         internal static ManualLogSource Log;
@@ -28,6 +28,7 @@ namespace RagfairMultiCurrency
         internal static ConfigEntry<bool> Colorize;
         internal static ConfigEntry<string> UsdColor;
         internal static ConfigEntry<string> EurColor;
+        internal static ConfigEntry<bool> HideVanillaPrices;
         internal static ConfigEntry<float> Gap;
         internal static ConfigEntry<float> VerticalNudge;
         internal static ConfigEntry<float> FontSize;
@@ -79,6 +80,9 @@ namespace RagfairMultiCurrency
 
             EurColor = Config.Bind("Display", "EurColor", "#5B8DEF",
                 "TMP color of the euro value, used when Colorize is on.");
+
+            HideVanillaPrices = Config.Bind("Display", "HideVanillaPrices", true,
+                "Hide the vanilla rouble price rows in the item preview. Reference prices move into the requirement area instead.");
 
             Gap = Config.Bind("Layout", "Gap", 4f,
                 new ConfigDescription(
