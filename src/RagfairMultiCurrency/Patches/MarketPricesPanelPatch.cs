@@ -422,6 +422,18 @@ namespace RagfairMultiCurrency.Patches
             }
         }
 
+        // Localization keys of the vanilla labels we replace. Taken from SPT_Data locales:
+        //   ragfair/REQUIREMENTS     -> 要求
+        //   ragfair/(per one item)   -> (每一件物品)
+        //   ragfair/(per all items)  -> (全部物品)
+        private static readonly string[] HiddenLocalizationKeys = new string[]
+        {
+            "ragfair/REQUIREMENTS",
+            "ragfair/(per one item)",
+            "ragfair/(per all items)",
+            "ragfair/per item"
+        };
+
         private static void HideRequirementTitle(ItemMarketPricesPanel panel)
         {
             if (!MultiCurrencyPlugin.HideVanillaPrices.Value)
@@ -441,37 +453,50 @@ namespace RagfairMultiCurrency.Patches
             for (int i = 0; i < texts.Length; i++)
             {
                 TextMeshProUGUI text = texts[i];
-                if (text == null || text.text == null)
+                if (text == null)
                 {
                     continue;
                 }
 
-                string value = text.text.Trim();
-                if (value.Length == 0)
+                string value = text.text == null ? string.Empty : text.text.Trim();
+
+                // Primary match: the localization key. Exact, language independent, and it cannot
+                // hit unrelated labels the way a substring search could.
+                string localizationKey = string.Empty;
+                LocalizedText localized = text.GetComponent<LocalizedText>();
+                if (localized != null && !string.IsNullOrEmpty(localized.localizationKey))
                 {
-                    continue;
+                    localizationKey = localized.localizationKey;
                 }
 
-                // Hide the vanilla "Requirement" header and its per-item sub-label on any
-                // language build. The sub-label is matched loosely because its wording differs
-                // between locale files ("每件物品" / "每一物品" / "за предмет" ...).
-                bool isRequirementHeader = value == "\u8981\u6C42" || value.StartsWith("\u8981\u6C42");
-                bool isPerItemLabel =
-                    value.IndexOf("\u7269\u54C1", StringComparison.Ordinal) >= 0 ||
-                    value.IndexOf("\u6BCF", StringComparison.Ordinal) >= 0;
+                bool shouldHide = false;
+                for (int k = 0; k < HiddenLocalizationKeys.Length; k++)
+                {
+                    if (localizationKey == HiddenLocalizationKeys[k])
+                    {
+                        shouldHide = true;
+                        break;
+                    }
+                }
+
+                // Fallback only when the object carries no localization key at all.
+                if (!shouldHide && localizationKey.Length == 0 && value.Length > 0)
+                {
+                    if (value == "\u8981\u6C42" || value.StartsWith("\u8981\u6C42"))
+                    {
+                        shouldHide = true;
+                    }
+                }
 
                 if (MultiCurrencyPlugin.LogPrices.Value && !_titleTextsDumped)
                 {
                     MultiCurrencyPlugin.Log.LogInfo(
-                        "[RMC] requirement text: \"" + value + "\"  hide=" + (isRequirementHeader || isPerItemLabel));
+                        "[RMC] requirement text: \"" + value + "\"  key=\"" + localizationKey + "\"  hide=" + shouldHide);
                 }
 
-                if (isRequirementHeader || isPerItemLabel)
+                if (shouldHide && text.gameObject.activeSelf)
                 {
-                    if (text.gameObject.activeSelf)
-                    {
-                        text.gameObject.SetActive(false);
-                    }
+                    text.gameObject.SetActive(false);
                 }
             }
 
