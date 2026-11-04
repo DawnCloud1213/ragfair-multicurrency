@@ -105,7 +105,17 @@ namespace RagfairMultiCurrency.Patches
 
         private static TextMeshProUGUI FindOrCreateBlock(AddOfferWindow window, ItemMarketPricesPanel panel)
         {
-            Transform existing = window.transform.Find(BlockName);
+            // The AddOfferWindow root is a full-screen 1920x1080 stretch container, so anchoring to it
+            // lands the block in a screen corner. The price panel's parent ("Labels", 486x235) is a plain
+            // container with no LayoutGroup, which makes it a safe anchor target that still follows the
+            // window when the player drags it around.
+            Transform parent = panel.transform.parent;
+            if (parent == null)
+            {
+                parent = window.transform;
+            }
+
+            Transform existing = parent.Find(BlockName);
             if (existing != null)
             {
                 TextMeshProUGUI existingText = existing.GetComponent<TextMeshProUGUI>();
@@ -122,19 +132,26 @@ namespace RagfairMultiCurrency.Patches
             }
 
             GameObject source = panel._lowestLabel._textMessage.gameObject;
-            GameObject clone = UnityEngine.Object.Instantiate<GameObject>(source, window.transform, false);
+            GameObject clone = UnityEngine.Object.Instantiate<GameObject>(source, parent, false);
             clone.name = BlockName;
             clone.SetActive(true);
+            clone.transform.SetAsLastSibling();
+
+            RectTransform panelRect = panel.transform as RectTransform;
+            float panelWidth = panelRect != null ? panelRect.rect.width : 160f;
+            float panelHeight = panelRect != null ? panelRect.rect.height : 57f;
+            float gap = MultiCurrencyPlugin.Gap.Value;
+            float nudge = MultiCurrencyPlugin.VerticalNudge.Value;
 
             RectTransform rect = clone.GetComponent<RectTransform>();
             if (rect != null)
             {
-                Vector2 anchor = new Vector2(MultiCurrencyPlugin.AnchorX.Value, MultiCurrencyPlugin.AnchorY.Value);
-                rect.anchorMin = anchor;
-                rect.anchorMax = anchor;
-                rect.pivot = new Vector2(0f, 0f);
-                rect.anchoredPosition = new Vector2(MultiCurrencyPlugin.OffsetX.Value, MultiCurrencyPlugin.OffsetY.Value);
-                rect.sizeDelta = new Vector2(MultiCurrencyPlugin.BlockWidth.Value, MultiCurrencyPlugin.BlockHeight.Value);
+                // Same top-right anchor as the vanilla price panel, pushed below it.
+                rect.anchorMin = new Vector2(1f, 1f);
+                rect.anchorMax = new Vector2(1f, 1f);
+                rect.pivot = new Vector2(1f, 1f);
+                rect.anchoredPosition = new Vector2(0f, -(panelHeight + gap + nudge));
+                rect.sizeDelta = new Vector2(panelWidth + 80f, 160f);
             }
 
             TextMeshProUGUI text = clone.GetComponent<TextMeshProUGUI>();
@@ -145,13 +162,15 @@ namespace RagfairMultiCurrency.Patches
 
             text.fontSize = MultiCurrencyPlugin.FontSize.Value;
             text.lineSpacing = MultiCurrencyPlugin.LineSpacing.Value;
-            text.alignment = TextAlignmentOptions.TopLeft;
+            text.alignment = TextAlignmentOptions.TopRight;
             text.enableWordWrapping = false;
             text.text = string.Empty;
 
             if (MultiCurrencyPlugin.LogPrices.Value)
             {
-                MultiCurrencyPlugin.Log.LogInfo("[RMC] extra price block created under AddOfferWindow.");
+                MultiCurrencyPlugin.Log.LogInfo(
+                    "[RMC] extra price block created under \"" + parent.name +
+                    "\" at y=" + (-(panelHeight + gap + nudge)).ToString("0.##", CultureInfo.InvariantCulture));
             }
 
             return text;

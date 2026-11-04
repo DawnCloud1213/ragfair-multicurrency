@@ -13,7 +13,7 @@ namespace RagfairMultiCurrency
     {
         public const string PluginGuid = "com.dawncloud.ragfairmulticurrency";
         public const string PluginName = "Ragfair Multi Currency Prices";
-        public const string PluginVersion = "0.2.0";
+        public const string PluginVersion = "0.2.1";
 
         internal static MultiCurrencyPlugin Instance;
         internal static ManualLogSource Log;
@@ -28,12 +28,8 @@ namespace RagfairMultiCurrency
         internal static ConfigEntry<bool> Colorize;
         internal static ConfigEntry<string> UsdColor;
         internal static ConfigEntry<string> EurColor;
-        internal static ConfigEntry<float> AnchorX;
-        internal static ConfigEntry<float> AnchorY;
-        internal static ConfigEntry<float> OffsetX;
-        internal static ConfigEntry<float> OffsetY;
-        internal static ConfigEntry<float> BlockWidth;
-        internal static ConfigEntry<float> BlockHeight;
+        internal static ConfigEntry<float> Gap;
+        internal static ConfigEntry<float> VerticalNudge;
         internal static ConfigEntry<float> FontSize;
         internal static ConfigEntry<float> LineSpacing;
         internal static ConfigEntry<bool> DumpLayout;
@@ -84,48 +80,28 @@ namespace RagfairMultiCurrency
             EurColor = Config.Bind("Display", "EurColor", "#5B8DEF",
                 "TMP color of the euro value, used when Colorize is on.");
 
-            AnchorX = Config.Bind("Layout", "AnchorX", 0.02f,
+            Gap = Config.Bind("Layout", "Gap", 4f,
                 new ConfigDescription(
-                    "Horizontal anchor of the extra price block inside the offer window. 0 = left edge, 1 = right edge.",
-                    new AcceptableValueRange<float>(0f, 1f)));
+                    "Vertical gap in pixels between the vanilla price panel and the extra block.",
+                    new AcceptableValueRange<float>(0f, 200f)));
 
-            AnchorY = Config.Bind("Layout", "AnchorY", 0.16f,
+            VerticalNudge = Config.Bind("Layout", "VerticalNudge", 0f,
                 new ConfigDescription(
-                    "Vertical anchor of the extra price block inside the offer window. 0 = bottom edge, 1 = top edge.",
-                    new AcceptableValueRange<float>(0f, 1f)));
+                    "Extra vertical offset in pixels. Positive moves the block down.",
+                    new AcceptableValueRange<float>(-300f, 300f)));
 
-            OffsetX = Config.Bind("Layout", "OffsetX", 24f,
-                new ConfigDescription(
-                    "Pixel offset applied on top of the anchor, horizontal.",
-                    new AcceptableValueRange<float>(-900f, 900f)));
-
-            OffsetY = Config.Bind("Layout", "OffsetY", 0f,
-                new ConfigDescription(
-                    "Pixel offset applied on top of the anchor, vertical.",
-                    new AcceptableValueRange<float>(-900f, 900f)));
-
-            BlockWidth = Config.Bind("Layout", "BlockWidth", 320f,
-                new ConfigDescription(
-                    "Width of the extra price block in pixels.",
-                    new AcceptableValueRange<float>(80f, 900f)));
-
-            BlockHeight = Config.Bind("Layout", "BlockHeight", 200f,
-                new ConfigDescription(
-                    "Height of the extra price block in pixels.",
-                    new AcceptableValueRange<float>(40f, 900f)));
-
-            FontSize = Config.Bind("Layout", "FontSize", 20f,
+            FontSize = Config.Bind("Layout", "FontSize", 18f,
                 new ConfigDescription(
                     "Font size of the extra price block.",
                     new AcceptableValueRange<float>(6f, 60f)));
 
-            LineSpacing = Config.Bind("Layout", "LineSpacing", 1.1f,
+            LineSpacing = Config.Bind("Layout", "LineSpacing", 1f,
                 new ConfigDescription(
                     "Line spacing multiplier of the extra price block.",
                     new AcceptableValueRange<float>(0.5f, 3f)));
 
-            DumpLayout = Config.Bind("Debug", "DumpLayout", true,
-                "Write the market price panel hierarchy (names, rects, texts) to the BepInEx log once per session. Needed to design the multi-column layout.");
+            DumpLayout = Config.Bind("Debug", "DumpLayout", false,
+                "Write the market price panel hierarchy (names, rects, texts) to the BepInEx log once per session. The layout is already captured; turn this on only when the anchor needs re-tuning.");
 
             LogPrices = Config.Bind("Debug", "LogPrices", true,
                 "Write every fetched min/avg/max plus the converted values to the BepInEx log.");
