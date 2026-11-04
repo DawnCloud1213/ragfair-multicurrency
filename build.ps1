@@ -86,6 +86,20 @@ Write-Host "Built: $outputDir\RagfairMultiCurrency.dll"
 if ($Deploy) {
     $deployDir = Join-Path $GameDir "BepInEx\plugins\RagfairMultiCurrency"
     New-Item -ItemType Directory -Force -Path $deployDir | Out-Null
-    Copy-Item -LiteralPath (Join-Path $outputDir "RagfairMultiCurrency.dll") -Destination $deployDir -Force
-    Write-Host "Deployed: $deployDir\RagfairMultiCurrency.dll"
+    $deployTarget = Join-Path $deployDir "RagfairMultiCurrency.dll"
+    $sourceDll = Join-Path $outputDir "RagfairMultiCurrency.dll"
+
+    try {
+        Copy-Item -LiteralPath $sourceDll -Destination $deployTarget -Force -ErrorAction Stop
+    }
+    catch {
+        # The game is probably running and holding the old dll mapped.
+        # Windows allows renaming a mapped file, so move it aside and copy again.
+        $backupName = "RagfairMultiCurrency.dll.old-" + (Get-Date -Format "yyyyMMdd-HHmmss")
+        Move-Item -LiteralPath $deployTarget -Destination (Join-Path $deployDir $backupName) -Force -ErrorAction Stop
+        Copy-Item -LiteralPath $sourceDll -Destination $deployTarget -Force -ErrorAction Stop
+        Write-Host "Hot-swapped: old dll renamed to $backupName. Restart the game to load the new build."
+    }
+
+    Write-Host "Deployed: $deployTarget"
 }
