@@ -451,8 +451,12 @@ namespace RagfairMultiCurrency.Patches
                     continue;
                 }
 
-                // Hide the vanilla "Requirement" section header on any language build.
-                if (value == "\u8981\u6C42" || value.StartsWith("\u8981\u6C42"))
+                // Hide the vanilla "Requirement" header and its "(per item)" sub-label
+                // on any language build.
+                bool isRequirementHeader = value == "\u8981\u6C42" || value.StartsWith("\u8981\u6C42");
+                bool isPerItemLabel = value.IndexOf("\u6BCF\u4EF6", StringComparison.Ordinal) >= 0;
+
+                if (isRequirementHeader || isPerItemLabel)
                 {
                     if (text.gameObject.activeSelf)
                     {
