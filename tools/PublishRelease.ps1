@@ -145,6 +145,23 @@ if ($localTag -or $remoteTag) {
 }
 Write-Plan "tag ${tag}: free"
 
+# gh writes its diagnostics to stderr even on success, so keep EAP relaxed around the probe.
+$savedEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+Push-Location $repoRoot
+try {
+    gh auth status 2>&1 | Out-Null
+    $ghCode = $LASTEXITCODE
+}
+finally {
+    Pop-Location
+    $ErrorActionPreference = $savedEap
+}
+if ($ghCode -ne 0) {
+    throw "gh is not logged in. Run 'gh auth login' first."
+}
+Write-Plan 'gh: logged in'
+
 if (-not $SkipBuild -and -not $GameDir) {
     throw 'Set SPT_GAME_DIR (or pass -GameDir) so build.ps1 can find the client assemblies; use -SkipBuild to reuse dist\.'
 }
