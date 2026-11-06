@@ -44,6 +44,21 @@ $env:SPT_GAME_DIR = "X:\your\SPT\client\folder"
 powershell -ExecutionPolicy Bypass -File build.ps1 -Deploy
 ```
 
+## 发布
+
+发布走本地脚本，**刻意不接 CI**：编译要 SPT 客户端里的 `Assembly-CSharp.dll` / `BepInEx.dll` 等第三方程序集，它们不能入库，云端也拿不到。
+
+```powershell
+$env:SPT_GAME_DIR = "X:\your\SPT\client\folder"
+powershell -ExecutionPolicy Bypass -File tools\PublishRelease.ps1 -Version 0.4.6
+```
+
+脚本依次做：校验工作区干净且 HEAD 已推送 → 编译 → 打 annotated tag `v0.4.6` → 推 tag → `gh release create` 建发布页并挂上 dll → 下载回来自校验 SHA256。
+
+- 想先看它要做什么：加 `-DryRun`（不编译、不打 tag、不上传）
+- 已有构建产物不想重编：加 `-SkipBuild`
+- 说明页模板在 `tools\release-notes-template.md`，变更列表自动从上一个 tag 到 HEAD 的提交生成；想手写就传 `-NotesFile`
+
 ## 配置（游戏内按 F12）
 
 | 配置 | 默认 | 说明 |
