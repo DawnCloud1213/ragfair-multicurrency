@@ -13,7 +13,7 @@ namespace RagfairMultiCurrency
     {
         public const string PluginGuid = "com.dawncloud.ragfairmulticurrency";
         public const string PluginName = "Ragfair Multi Currency Prices";
-        public const string PluginVersion = "0.4.5";
+        public const string PluginVersion = "0.5.0";
 
         internal static MultiCurrencyPlugin Instance;
         internal static ManualLogSource Log;
@@ -33,6 +33,7 @@ namespace RagfairMultiCurrency
         internal static ConfigEntry<float> LineSpacing;
         internal static ConfigEntry<bool> DumpLayout;
         internal static ConfigEntry<bool> LogPrices;
+        internal static ConfigEntry<bool> InstantAutoSelectSimilar;
 
         private Harmony _harmony;
 
@@ -98,27 +99,64 @@ namespace RagfairMultiCurrency
             LogPrices = Config.Bind("Debug", "LogPrices", true,
                 "Write every fetched min/avg/max plus the converted values to the BepInEx log.");
 
+            InstantAutoSelectSimilar = Config.Bind("General", "InstantAutoSelectSimilar", true,
+                "Make the 'auto select similar items' checkbox act immediately. Vanilla only stores the flag and applies it the next time the offer window is opened. When unticked, the selection shrinks back to the last clicked item.");
+
+
             _harmony = new Harmony(PluginGuid);
 
             MethodInfo target = AccessTools.Method(typeof(ItemMarketPricesPanel), "CG_UpdatePrices");
             if (target == null)
             {
                 Logger.LogError("[RMC] ItemMarketPricesPanel.CG_UpdatePrices not found. Patch skipped.");
-                return;
+            }
+            else
+            {
+                MethodInfo postfix = typeof(Patches.MarketPricesPanelPatch).GetMethod(
+                    "Postfix",
+                    BindingFlags.Static | BindingFlags.NonPublic);
+
+                if (postfix == null)
+                {
+                    Logger.LogError("[RMC] MarketPricesPanelPatch.Postfix not found. Patch skipped.");
+                }
+                else
+                {
+                    _harmony.Patch(target, null, new HarmonyMethod(postfix));
+                    Logger.LogInfo("[RMC] Patched " + target.DeclaringType.FullName + "." + target.Name);
+                }
             }
 
-            MethodInfo postfix = typeof(Patches.MarketPricesPanelPatch).GetMethod(
-                "Postfix",
+            PatchAutoSelectSimilar();
+        }
+
+        /// <summary>
+        /// Two extra patches that make the "auto select similar items" checkbox act immediately
+        /// instead of waiting for the offer window to be reopened.
+        /// </summary>
+        private void PatchAutoSelectSimilar()
+        {
+            MethodInfo toggle = AccessTools.Method(typeof(EFT.UI.Ragfair.AddOfferWindow), "AutoSelectSimilarChanged");
+            MethodInfo selectItem = AccessTools.Method(typeof(EFT.UI.RagfairNewOfferContext), "SelectItem", new Type[] { typeof(EFT.InventoryLogic.Item) });
+
+            MethodInfo togglePostfix = typeof(Patches.AutoSelectSimilarPatch).GetMethod(
+                "TogglePostfix",
                 BindingFlags.Static | BindingFlags.NonPublic);
 
-            if (postfix == null)
+            MethodInfo selectPostfix = typeof(Patches.AutoSelectSimilarPatch).GetMethod(
+                "SelectItemPostfix",
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            if (toggle == null || selectItem == null || togglePostfix == null || selectPostfix == null)
             {
-                Logger.LogError("[RMC] MarketPricesPanelPatch.Postfix not found. Patch skipped.");
+                Logger.LogError("[RMC] auto select similar targets not found. That feature is disabled.");
                 return;
             }
 
-            _harmony.Patch(target, null, new HarmonyMethod(postfix));
-            Logger.LogInfo("[RMC] Patched " + target.DeclaringType.FullName + "." + target.Name);
+            _harmony.Patch(toggle, null, new HarmonyMethod(togglePostfix));
+            _harmony.Patch(selectItem, null, new HarmonyMethod(selectPostfix));
+
+            Logger.LogInfo("[RMC] Patched AddOfferWindow.AutoSelectSimilarChanged and RagfairNewOfferContext.SelectItem");
         }
 
         private void OnDestroy()

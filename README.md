@@ -5,7 +5,7 @@
 - 游戏：SPT 4.1.6
 - 环境：BepInEx 5.4.23.5 + Harmony 2.9.0，net472
 - 类型：**纯客户端 UI 模组**，不碰交易事务，Fika 联机无同步影响
-- 状态：v0.4.5 实机验收通过
+- 状态：v0.5.0 待实机验收
 
 ## 效果
 
@@ -65,6 +65,7 @@ powershell -ExecutionPolicy Bypass -File tools\PublishRelease.ps1 -Version 0.4.6
 |---|---|---|
 | `General.Enabled` | true | 总开关 |
 | `General.Scope` | AddOfferWindowOnly | 只在新增报价窗口生效 / All 全部市场价面板 |
+| `General.InstantAutoSelectSimilar` | true | 「自动选择同类物品」勾选后立即生效（原版要重开窗口）；取消勾选时收缩到最后点击的那件 |
 | `Rates.RoublesPerUsd` | 110 | 1 美元 = 多少卢布 |
 | `Rates.RoublesPerEur` | 130 | 1 欧元 = 多少卢布 |
 | `Display.ShowUsd` | true | 显示美元行 |
@@ -107,6 +108,46 @@ RequirementView.SetValue(string s)
 
 所以模组只需要「按货币找到 `RequirementView`（`_currency` 字段）→ 调 `SetValue`」；
 清空其它货币同样是 `SetValue("")` → `AtInput` 判空 → `ResetRequirementInformation()`。
+
+### 「自动选择同类物品」为什么勾了不生效（v0.5.0 修）
+
+原版的勾选回调是空壳：
+
+```
+AddOfferWindow.AutoSelectSimilarChanged(bool v)
+    → _offerContext.AutoSelectSimilar = v      # 只存了个布尔值，什么也没做
+      ret
+
+RagfairNewOfferContext.set_AutoSelectSimilar(bool v)
+    → _autoSelectSimilar = v                   # 存值
+      ret
+```
+
+真正干活的是 `RagfairNewOfferContext.SelectItem(Item)`，它在内部读这个开关：
+
+```
+if (AutoSelectSimilar) {
+    list = 同容器同类.Where(Item.Compare).Where(CanBeSelectedAtRagfair).OrderBy(...)
+    ClearSelectedList()
+    for (i = 0; i < Min(list.Count, 容量上限); i++) AddToSelection(list[i])
+}
+```
+
+而这个方法的调用方全游戏只有三处：点物品(`RagfairNewOfferItemView.OnClick`)、
+打开窗口时传入选定物品(`AddOfferWindow.Show`)、`TrySelectFirstAvailableItem`。
+**勾选回调不在其中**，所以勾选时没有任何东西被重新选中，必须重开窗口才会走 `SelectItem`。
+
+v0.5.0 的补丁：
+
+| 补丁 | 作用 |
+|---|---|
+| `AddOfferWindow.AutoSelectSimilarChanged` Postfix | 勾选 → `ClearSelectedList()` + `SelectItem(锚点)`；取消 → 逐项 `DeselectItem` 只留锚点 |
+| `RagfairNewOfferContext.SelectItem` Postfix | 记住最后点击的物品，作为取消勾选时的收缩目标 |
+
+**关键坑**：`SelectItem` 开头是
+`if (_selectedItems.Contains(item)) { DeselectItem(item); return; }`，
+勾选那一刻锚点已经在选中集合里，直接调用会变成"全部取消选择"，
+所以必须先 `ClearSelectedList()` 再 `SelectItem`。
 
 ### 布局挂载点（实机 dump 得到）
 
@@ -156,6 +197,8 @@ AddOfferWindow        rect=1920x1080  全屏拉伸容器（不能用来定位）
 - `row cells created for RUB/USD/EUR` — 价格格创建
 - `requirement text: "..."  key="..."  hide=...` — 原版文本的隐藏判定依据
 - `cleared other currencies, filled USD with 342` — 点击填价结果
+- `auto select applied; item="..." selected=N` — 勾选后立即选中了 N 件
+- `auto select released; kept="..." removed=N` — 取消勾选后保留锚点、移除 N 件
 
 ## 版本历史
 
@@ -170,6 +213,7 @@ AddOfferWindow        rect=1920x1080  全屏拉伸容器（不能用来定位）
 | v0.4.2 | 加表头（最低/平均/最高/报价） |
 | v0.4.3 ~ v0.4.4 | 隐藏「要求」「(每一件物品)」标题 |
 | v0.4.5 | 改为按 localizationKey 精确隐藏，杜绝误伤；点击填价时清空其它货币 |
+| v0.5.0 | 「自动选择同类物品」勾选即生效，无需重开窗口；取消勾选收缩到最后点击的物品 |
 
 ## 已知限制
 
